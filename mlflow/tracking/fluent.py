@@ -3453,8 +3453,11 @@ def _get_experiment_id_from_env():
 def _get_experiment_id() -> str | None:
     if _active_experiment_id:
         return _active_experiment_id
-    else:
-        return _get_experiment_id_from_env() or default_experiment_registry.get_experiment_id()
+    if exp_id := _get_experiment_id_from_env():
+        return exp_id
+    if IS_TRACING_SDK_ONLY:
+        return None if is_databricks_uri(_resolve_tracking_uri()) else "0"
+    return default_experiment_registry.get_experiment_id()
 
 
 @autologging_integration("mlflow")
