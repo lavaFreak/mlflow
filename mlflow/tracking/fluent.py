@@ -58,6 +58,7 @@ from mlflow.tracing.provider import (
 )
 from mlflow.tracking._tracking_service.client import TrackingServiceClient
 from mlflow.tracking._tracking_service.utils import _resolve_tracking_uri
+from mlflow.tracking.default_experiment import registry as default_experiment_registry
 from mlflow.utils import get_results_from_paginated_fn
 from mlflow.utils.annotations import experimental
 from mlflow.utils.async_logging.run_operations import RunOperations
@@ -102,7 +103,6 @@ if not IS_TRACING_SDK_ONLY:
     from mlflow.tracking import _get_artifact_repo, _get_store, artifact_utils
     from mlflow.tracking.client import MlflowClient
     from mlflow.tracking.context import registry as context_registry
-    from mlflow.tracking.default_experiment import registry as default_experiment_registry
 
 
 if TYPE_CHECKING:
@@ -3423,8 +3423,9 @@ def _get_or_start_run():
 def _get_experiment_id_from_env():
     experiment_name = MLFLOW_EXPERIMENT_NAME.get()
     experiment_id = MLFLOW_EXPERIMENT_ID.get()
+    client = TrackingServiceClient(_resolve_tracking_uri())
     if experiment_name is not None:
-        if exp := MlflowClient().get_experiment_by_name(experiment_name):
+        if exp := client.get_experiment_by_name(experiment_name):
             if experiment_id and experiment_id != exp.experiment_id:
                 raise MlflowException(
                     message=f"The provided {MLFLOW_EXPERIMENT_ID} environment variable "
@@ -3435,10 +3436,10 @@ def _get_experiment_id_from_env():
             else:
                 return exp.experiment_id
         else:
-            return MlflowClient().create_experiment(name=experiment_name)
+            return client.create_experiment(experiment_name)
     if experiment_id is not None:
         try:
-            exp = MlflowClient().get_experiment(experiment_id)
+            exp = client.get_experiment(experiment_id)
             return exp.experiment_id
         except MlflowException as exc:
             raise MlflowException(
