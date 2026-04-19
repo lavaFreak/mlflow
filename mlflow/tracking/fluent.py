@@ -3423,8 +3423,9 @@ def _get_or_start_run():
 def _get_experiment_id_from_env():
     experiment_name = MLFLOW_EXPERIMENT_NAME.get()
     experiment_id = MLFLOW_EXPERIMENT_ID.get()
+    client = TrackingServiceClient(_resolve_tracking_uri())
     if experiment_name is not None:
-        if exp := MlflowClient().get_experiment_by_name(experiment_name):
+        if exp := client.get_experiment_by_name(experiment_name):
             if experiment_id and experiment_id != exp.experiment_id:
                 raise MlflowException(
                     message=f"The provided {MLFLOW_EXPERIMENT_ID} environment variable "
@@ -3435,10 +3436,10 @@ def _get_experiment_id_from_env():
             else:
                 return exp.experiment_id
         else:
-            return MlflowClient().create_experiment(name=experiment_name)
+            return client.create_experiment(experiment_name)
     if experiment_id is not None:
         try:
-            exp = MlflowClient().get_experiment(experiment_id)
+            exp = client.get_experiment(experiment_id)
             return exp.experiment_id
         except MlflowException as exc:
             raise MlflowException(
@@ -3452,8 +3453,11 @@ def _get_experiment_id_from_env():
 def _get_experiment_id() -> str | None:
     if _active_experiment_id:
         return _active_experiment_id
-    else:
-        return _get_experiment_id_from_env() or default_experiment_registry.get_experiment_id()
+    if exp_id := _get_experiment_id_from_env():
+        return exp_id
+    if IS_TRACING_SDK_ONLY:
+        return None if is_databricks_uri(_resolve_tracking_uri()) else "0"
+    return default_experiment_registry.get_experiment_id()
 
 
 @autologging_integration("mlflow")
