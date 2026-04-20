@@ -168,6 +168,7 @@ from mlflow.server.handlers import (
     _get_presigned_download_url,
     _get_registered_model,
     _get_request_message,
+    _response_with_file_attachment_headers,
     _get_rest_path,
     _get_scorer,
     _get_trace,
@@ -4504,6 +4505,21 @@ def test_get_artifact_handler_no_scoping_when_workspaces_disabled(monkeypatch):
         mock_send.assert_called_once()
         artifact_path = mock_send.call_args[0][1]
         assert not artifact_path.startswith("workspaces/")
+
+
+def test_response_with_file_attachment_headers_sanitizes_filename():
+    # Filenames can contain control characters on POSIX filesystems, but these are invalid in HTTP
+    # header values and can cause Werkzeug / the WSGI server to reject the response.
+    response = app.response_class()
+    file_path = "images/image_0%step\x10%timestamp\x1716863738870\x0cabc.png"
+    response = _response_with_file_attachment_headers(file_path, response)
+
+    content_disposition = response.headers["Content-Disposition"]
+    assert "\x10" not in content_disposition
+    assert "\x17" not in content_disposition
+    assert "\x0c" not in content_disposition
+    assert "\ufffd" not in content_disposition
+    assert content_disposition.startswith('attachment; filename="')
 
 
 def test_get_model_version_artifact_handler_applies_workspace_scoping(monkeypatch):

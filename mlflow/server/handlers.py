@@ -1005,21 +1005,80 @@ def _get_validated_flask_request_json(
 def _response_with_file_attachment_headers(file_path, response):
     mime_type = _guess_mime_type(file_path)
     filename = pathlib.Path(file_path).name
+    filename = _sanitize_filename_for_content_disposition(filename)
     response.mimetype = mime_type
     content_disposition_header_name = "Content-Disposition"
-    if content_disposition_header_name not in response.headers:
-        response.headers[content_disposition_header_name] = f"attachment; filename={filename}"
+    # Always send artifacts as attachments to prevent the browser from displaying them on our web
+    # server's domain, which might enable XSS.
+    #
+    # We also sanitize the filename because artifacts can contain arbitrary bytes that are valid on
+    # POSIX filesystems, but invalid in HTTP header values (e.g. control characters). Those can
+    # cause Werkzeug / the WSGI server to reject the response as a Bad Request.
+    response.headers[content_disposition_header_name] = f'attachment; filename="{filename}"'
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Content-Type"] = mime_type
     return response
 
 
+_CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x1F\x7F]")
+
+
+def _sanitize_filename_for_content_disposition(filename: str) -> str:
+    """
+    Sanitize a filename for use in a Content-Disposition header value.
+
+    Artifacts can have arbitrary filenames (including bytes that are valid on POSIX filesystems).
+    HTTP header values must not contain control characters, and it's safest to restrict filenames
+    to visible ASCII in this context.
+    """
+    if not filename:
+        return "artifact"
+
+    # Keep visible ASCII and replace everything else with underscores.
+    sanitized_chars: list[str] = []
+    for ch in filename:
+        codepoint = ord(ch)
+        if 32 <= codepoint <= 126 and ch not in {'"', "\\"}:
+            sanitized_chars.append(ch)
+        else:
+            sanitized_chars.append("_")
+
+    sanitized = "".join(sanitized_chars)
+    sanitized = _CONTROL_CHAR_PATTERN.sub("_", sanitized)
+    sanitized = sanitized.strip(" ._")
+    return sanitized or "artifact"
+
+
+def _send_file_as_attachment(file_path: str, *, mime_type: str, download_name: str):
+    """
+    Wrap `flask.send_file` for cross-version compatibility.
+
+    Newer Flask versions use `download_name`; older versions used `attachment_filename`.
+    """
+    try:
+        return send_file(
+            file_path,
+            mimetype=mime_type,
+            as_attachment=True,
+            download_name=download_name,
+        )
+    except TypeError:
+        # Flask < 2.0
+        return send_file(
+            file_path,
+            mimetype=mime_type,
+            as_attachment=True,
+            attachment_filename=download_name,
+        )
+
+
 def _send_artifact(artifact_repository, path):
     file_path = os.path.abspath(artifact_repository.download_artifacts(path))
-    # Always send artifacts as attachments to prevent the browser from displaying them on our web
-    # server's domain, which might enable XSS.
     mime_type = _guess_mime_type(file_path)
-    file_sender_response = send_file(file_path, mimetype=mime_type, as_attachment=True)
+    download_name = _sanitize_filename_for_content_disposition(pathlib.Path(file_path).name)
+    file_sender_response = _send_file_as_attachment(
+        file_path, mime_type=mime_type, download_name=download_name
+    )
     return _response_with_file_attachment_headers(file_path, file_sender_response)
 
 
