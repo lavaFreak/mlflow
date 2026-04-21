@@ -713,7 +713,11 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         pass
     else:
         current_process = psutil.Process()
-        if children := current_process.children(recursive=True):
+        try:
+            children = current_process.children(recursive=True)
+        except (OSError, PermissionError):
+            children = []
+        if children:
             terminalreporter.section("Remaining child processes", yellow=True)
             for idx, child in enumerate(children, start=1):
                 terminalreporter.write(f"{idx}: {child}\n")

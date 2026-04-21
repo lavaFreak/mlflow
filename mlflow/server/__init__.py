@@ -362,8 +362,7 @@ def _run_server(
         env_map[REGISTRY_STORE_URI_ENV_VAR] = registry_store_uri
     if default_artifact_root:
         env_map[ARTIFACT_ROOT_ENV_VAR] = default_artifact_root
-    if serve_artifacts:
-        env_map[SERVE_ARTIFACTS_ENV_VAR] = "true"
+    env_map[SERVE_ARTIFACTS_ENV_VAR] = "true" if serve_artifacts else "false"
     if artifacts_only:
         env_map[ARTIFACTS_ONLY_ENV_VAR] = "true"
     if artifacts_destination:

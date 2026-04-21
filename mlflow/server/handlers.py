@@ -465,7 +465,11 @@ def _get_artifact_repo_mlflow_artifacts():
 
     global _artifact_repo
     if _artifact_repo is None:
-        _artifact_repo = get_artifact_repository(os.environ[ARTIFACTS_DESTINATION_ENV_VAR])
+        # `mlflow server` defaults artifacts destination to `./mlartifacts`. When running the
+        # server as a WSGI app (e.g. gunicorn with `mlflow.server:app`), the CLI layer may be
+        # bypassed, so the env var can be unset.
+        artifacts_destination = os.environ.get(ARTIFACTS_DESTINATION_ENV_VAR, "./mlartifacts")
+        _artifact_repo = get_artifact_repository(artifacts_destination)
     return _artifact_repo
 
 
@@ -511,7 +515,12 @@ def _is_serving_proxied_artifacts():
     """
     from mlflow.server import SERVE_ARTIFACTS_ENV_VAR
 
-    return os.environ.get(SERVE_ARTIFACTS_ENV_VAR, "false") == "true"
+    value = os.environ.get(SERVE_ARTIFACTS_ENV_VAR)
+    # `mlflow server` defaults `--serve-artifacts` to True. When running the server as a WSGI app
+    # (bypassing the CLI), the env var may be unset; default to the CLI behavior.
+    if value is None:
+        return True
+    return value.strip().lower() in {"1", "true", "yes", "y", "t", "on"}
 
 
 def _is_servable_proxied_run_artifact_root(run_artifact_root):
@@ -609,6 +618,21 @@ def _get_tracking_store(
     if _tracking_store is None:
         store_uri = backend_store_uri or os.environ.get(BACKEND_STORE_URI_ENV_VAR, None)
         artifact_root = default_artifact_root or os.environ.get(ARTIFACT_ROOT_ENV_VAR, None)
+        if artifact_root is None:
+            from mlflow.store.tracking import (
+                DEFAULT_ARTIFACTS_URI,
+                DEFAULT_LOCAL_FILE_AND_ARTIFACT_PATH,
+            )
+            from mlflow.utils.uri import is_local_uri
+
+            if _is_serving_proxied_artifacts():
+                artifact_root = DEFAULT_ARTIFACTS_URI
+            else:
+                artifact_root = (
+                    store_uri
+                    if store_uri and is_local_uri(store_uri)
+                    else DEFAULT_LOCAL_FILE_AND_ARTIFACT_PATH
+                )
         _tracking_store = _tracking_store_registry.get_store(store_uri, artifact_root)
         utils.set_tracking_uri(store_uri)
     return _tracking_store
